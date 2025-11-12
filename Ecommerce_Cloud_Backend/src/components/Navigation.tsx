@@ -84,7 +84,8 @@ export default function Navigation() {
         
         // Load unread messages when user is loaded
         if (userData?.id) {
-          loadUnreadMessages(userData.id);
+          const userType = userData.userType || 'customer';
+          loadUnreadMessages(userData.id, userType);
         }
       } catch (error) {
         setUser(null);
@@ -95,13 +96,14 @@ export default function Navigation() {
       setCartCount(readCartCount());
     }
 
-    async function loadUnreadMessages(userId: string) {
+    async function loadUnreadMessages(userId: string, userType: string = 'customer') {
       try {
-        const res = await fetch(`/api/conversations?userId=${userId}&userType=customer`);
+        const res = await fetch(`/api/conversations?userId=${userId}&userType=${userType}`);
         if (res.ok) {
           const data = await res.json();
           // Count total unread messages from all conversations
-          const totalUnread = data.data?.conversations?.reduce((sum: number, conv: any) => sum + conv.customerUnread, 0) || 0;
+          const unreadField = userType === 'vendor' ? 'vendorUnread' : 'customerUnread';
+          const totalUnread = data.data?.conversations?.reduce((sum: number, conv: any) => sum + (conv[unreadField] || 0), 0) || 0;
           setUnreadMessageCount(totalUnread);
         }
       } catch (error) {
@@ -126,7 +128,8 @@ export default function Navigation() {
         if (stored) {
           const userData = JSON.parse(stored);
           if (userData?.id) {
-            loadUnreadMessages(userData.id);
+            const userType = userData.userType || 'customer';
+            loadUnreadMessages(userData.id, userType);
           }
         }
       }
@@ -142,7 +145,8 @@ export default function Navigation() {
       if (stored) {
         const userData = JSON.parse(stored);
         if (userData?.id) {
-          loadUnreadMessages(userData.id);
+          const userType = userData.userType || 'customer';
+          loadUnreadMessages(userData.id, userType);
         }
       }
     }, 30000); // 30 seconds

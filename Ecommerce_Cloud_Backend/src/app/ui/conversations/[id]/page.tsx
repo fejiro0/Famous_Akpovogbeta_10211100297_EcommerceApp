@@ -61,6 +61,7 @@ export default function ChatPage({
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [newMessage, setNewMessage] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [userType, setUserType] = useState<'customer' | 'vendor'>('customer');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messageInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -87,6 +88,7 @@ export default function ChatPage({
     }
 
     setUserId(user.id);
+    setUserType(user.userType || 'customer');
   }, [router]);
 
   useEffect(() => {
@@ -131,7 +133,7 @@ export default function ChatPage({
       await fetch(`/api/conversations/${conversationId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userType: "customer" }),
+        body: JSON.stringify({ userType }),
       });
 
       // Trigger storage event to update unread count in Navigation
@@ -158,7 +160,7 @@ export default function ChatPage({
         body: JSON.stringify({
           content: messageContent,
           senderId: userId,
-          senderType: "customer",
+          senderType: userType,
         }),
       });
 
@@ -341,7 +343,7 @@ export default function ChatPage({
 
             {/* Messages for this date */}
             {messages.map((msg) => {
-              const isMyMessage = msg.senderType === "customer";
+              const isMyMessage = msg.senderType === userType;
 
               return (
                 <div

@@ -43,6 +43,7 @@ export default function ConversationsPage() {
   const [conversations, setConversations] = useState<ConversationItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [userId, setUserId] = useState<string | null>(null);
+  const [userType, setUserType] = useState<'customer' | 'vendor'>('customer');
 
   useEffect(() => {
     setMounted(true);
@@ -62,14 +63,16 @@ export default function ConversationsPage() {
       return;
     }
 
+    const type = user.userType || 'customer';
     setUserId(user.id);
-    loadConversations(user.id);
+    setUserType(type);
+    loadConversations(user.id, type);
   }, [router]);
 
-  async function loadConversations(customerId: string) {
+  async function loadConversations(uid: string, type: string) {
     setLoading(true);
     try {
-      const res = await fetch(`/api/conversations?userId=${customerId}&userType=customer`);
+      const res = await fetch(`/api/conversations?userId=${uid}&userType=${type}`);
       if (!res.ok) throw new Error("Failed to load conversations");
 
       const data = await res.json();
@@ -85,8 +88,23 @@ export default function ConversationsPage() {
   function getLastMessagePreview(conv: ConversationItem): string {
     if (conv.messages.length === 0) return "No messages yet";
     const lastMsg = conv.messages[0];
-    const prefix = lastMsg.senderType === "customer" ? "You: " : "";
+    const isMyMessage = lastMsg.senderType === userType;
+    const prefix = isMyMessage ? "You: " : "";
     return prefix + (lastMsg.content.length > 50 ? lastMsg.content.substring(0, 50) + "..." : lastMsg.content);
+  }
+
+  function getOtherPartyName(conv: ConversationItem): string {
+    return userType === 'vendor' 
+      ? `${conv.customer.firstName} ${conv.customer.lastName}`
+      : conv.vendor.vendorName;
+  }
+
+  function getOtherPartyLogo(conv: ConversationItem): string | null {
+    return userType === 'vendor' ? null : conv.vendor.storeLogo;
+  }
+
+  function getUnreadCount(conv: ConversationItem): number {
+    return userType === 'vendor' ? conv.vendorUnread : conv.customerUnread;
   }
 
   function getTimeAgo(dateString: string): string {
@@ -106,11 +124,13 @@ export default function ConversationsPage() {
     return date.toLocaleDateString();
   }
 
-  const filteredConversations = conversations.filter((conv) =>
-    conv.vendor.vendorName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    conv.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (conv.product?.productName || "").toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredConversations = conversations.filter((conv) => {
+    const query = searchQuery.toLowerCase();
+    const otherParty = getOtherPartyName(conv).toLowerCase();
+    const subject = conv.subject.toLowerCase();
+    const product = (conv.product?.productName || "").toLowerCase();
+    return otherParty.includes(query) || subject.includes(query) || product.includes(query);
+  });
 
   if (!mounted) return null;
 
@@ -182,27 +202,27 @@ export default function ConversationsPage() {
                 className="block hover:bg-gray-50 transition-colors"
               >
                 <div className="p-4 flex items-center gap-4">
-                  {/* Vendor Logo */}
+                  {/* Other Party Logo/Avatar */}
                   <div className="relative flex-shrink-0">
-                    {conv.vendor.storeLogo ? (
+                    {getOtherPartyLogo(conv) ? (
                       <Image
-                        src={conv.vendor.storeLogo}
-                        alt={conv.vendor.vendorName}
+                        src={getOtherPartyLogo(conv)!}
+                        alt={getOtherPartyName(conv)}
                         width={56}
                         height={56}
                         className="w-14 h-14 rounded-full object-cover border-2 border-gray-200"
-                        unoptimized={conv.vendor.storeLogo.startsWith("data:")}
+                        unoptimized={getOtherPartyLogo(conv)!.startsWith("data:")}
                       />
                     ) : (
                       <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center border-2 border-gray-200">
                         <span className="text-green-600 font-bold text-lg">
-                          {conv.vendor.vendorName.charAt(0).toUpperCase()}
+                          {getOtherPartyName(conv).charAt(0).toUpperCase()}
                         </span>
                       </div>
                     )}
-                    {conv.customerUnread > 0 && (
+                    {getUnreadCount(conv) > 0 && (
                       <div className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full min-w-[20px] h-5 flex items-center justify-center px-1 font-semibold">
-                        {conv.customerUnread > 9 ? "9+" : conv.customerUnread}
+                        {getUnreadCount(conv) > 9 ? "9+" : getUnreadCount(conv)}
                       </div>
                     )}
                   </div>
@@ -211,7 +231,7 @@ export default function ConversationsPage() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <h3 className="font-semibold text-gray-900 truncate">
-                        {conv.vendor.vendorName}
+                        {getOtherPartyName(conv)}
                       </h3>
                       <span className="text-xs text-gray-500 flex-shrink-0 ml-2">
                         {getTimeAgo(conv.lastMessageAt)}
@@ -229,7 +249,7 @@ export default function ConversationsPage() {
                     {/* Last Message */}
                     <p
                       className={`text-sm truncate ${
-                        conv.customerUnread > 0
+                        getUnreadCount(conv) > 0
                           ? "font-semibold text-gray-900"
                           : "text-gray-600"
                       }`}
@@ -239,7 +259,7 @@ export default function ConversationsPage() {
                   </div>
 
                   {/* Unread Indicator */}
-                  {conv.customerUnread > 0 && (
+                  {getUnreadCount(conv) > 0 && (
                     <FaCircle className="text-green-500 text-xs flex-shrink-0" />
                   )}
                 </div>
