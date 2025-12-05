@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { FaShoppingCart, FaStar, FaMapMarkerAlt, FaShieldAlt, FaMobileAlt, FaBolt } from "react-icons/fa";
+import { FaShoppingCart, FaStar, FaMapMarkerAlt, FaShieldAlt, FaMobileAlt, FaBolt, FaPlus, FaMinus, FaTrash, FaTimes } from "react-icons/fa";
 import { FiImage } from "react-icons/fi";
+import { toast } from "react-toastify";
 
 type Product = {
   id: string;
@@ -29,10 +30,41 @@ type Category = {
   description?: string;
 };
 
+type CartItem = {
+  productId: string;
+  productName: string;
+  price: number;
+  imageURL?: string | null;
+  quantity: number;
+  stockQuantity: number;
+};
+
+const CART_KEY = "gomart:cart";
+
+function readCart(): CartItem[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const stored = localStorage.getItem(CART_KEY);
+    return stored ? JSON.parse(stored) : [];
+  } catch (error) {
+    console.error("Failed to parse cart", error);
+    return [];
+  }
+}
+
+function writeCart(items: CartItem[]) {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(CART_KEY, JSON.stringify(items));
+  window.dispatchEvent(new StorageEvent("storage", { key: CART_KEY }));
+}
+
 export default function HomePage() {
   const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [showCartPreview, setShowCartPreview] = useState(false);
+  const [productQuantities, setProductQuantities] = useState<Record<string, number>>({});
 
   useEffect(() => {
     async function loadData() {
@@ -44,7 +76,14 @@ export default function HomePage() {
 
         if (productsRes.ok) {
           const data = await productsRes.json();
-          setFeaturedProducts(data.data?.products || []);
+          const products = data.data?.products || [];
+          setFeaturedProducts(products);
+          // Initialize quantities to 1 for each product
+          const initialQuantities: Record<string, number> = {};
+          products.forEach((product: Product) => {
+            initialQuantities[product.id] = 1;
+          });
+          setProductQuantities(initialQuantities);
         }
 
         if (categoriesRes.ok) {
@@ -58,7 +97,248 @@ export default function HomePage() {
       }
     }
     loadData();
+
+    // Load cart from localStorage
+    const items = readCart();
+    setCartItems(items);
+
+    // Listen for cart changes
+    function handleStorage(event: StorageEvent) {
+      if (event.key === CART_KEY) {
+        const items = readCart();
+        setCartItems(items);
+      }
+    }
+    window.addEventListener("storage", handleStorage);
+    return () => window.removeEventListener("storage", handleStorage);
   }, []);
+
+  const cartTotals = useMemo(() => {
+    const subtotal = cartItems.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const shipping = subtotal === 0 ? 0 : subtotal >= 500 ? 0 : 20;
+    const total = subtotal + shipping;
+    const totalItems = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+    return { subtotal, shipping, total, totalItems };
+  }, [cartItems]);
+
+  function updateQuantity(productId: string, delta: number) {
+    setProductQuantities((prev) => {
+      const current = prev[productId] || 1;
+      const product = featuredProducts.find((p) => p.id === productId);
+      const maxQuantity = product?.stockQuantity || 1;
+      const newQuantity = Math.min(Math.max(current + delta, 1), maxQuantity);
+      return { ...prev, [productId]: newQuantity };
+    });
+  }
+
+  function setQuantity(productId: string, quantity: number) {
+    const product = featuredProducts.find((p) => p.id === productId);
+    const maxQuantity = product?.stockQuantity || 1;
+    const validQuantity = Math.min(Math.max(quantity, 1), maxQuantity);
+    setProductQuantities((prev) => ({ ...prev, [productId]: validQuantity }));
+  }
+
+  async function updateProductStock(productId: string, quantityChange: number) {
+    try {
+      const response = await fetch(`/api/products/${productId}/stock`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantityChange }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || 'Failed to update stock');
+      }
+
+      const result = await response.json();
+      
+      // Update local product state with new stock
+      setFeaturedProducts((prev) =>
+        prev.map((p) =>
+          p.id === productId
+            ? { ...p, stockQuantity: result.data.newStock }
+            : p
+        )
+      );
+
+      return result;
+    } catch (error) {
+      console.error('Failed to update stock:', error);
+      throw error;
+    }
+  }
+
+  async function refreshProduct(productId: string) {
+    try {
+      const response = await fetch(`/api/products/${productId}`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data?.product) {
+          setFeaturedProducts((prev) =>
+            prev.map((p) =>
+              p.id === productId
+                ? { ...p, stockQuantity: data.data.product.stockQuantity }
+                : p
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.error('Failed to refresh product:', error);
+    }
+  }
+
+  async function addToCart(product: Product) {
+    const quantity = productQuantities[product.id] || 1;
+    
+    if (quantity > product.stockQuantity) {
+      toast.error(`Only ${product.stockQuantity} items available in stock`);
+      return;
+    }
+
+    if (product.stockQuantity <= 0) {
+      toast.error("This product is out of stock");
+      return;
+    }
+
+    const currentCart = readCart();
+    const existingItemIndex = currentCart.findIndex((item) => item.productId === product.id);
+
+    let quantityChange = quantity;
+    let updatedCart: CartItem[];
+    
+    if (existingItemIndex >= 0) {
+      // Update existing item
+      const existingItem = currentCart[existingItemIndex];
+      const newQuantity = existingItem.quantity + quantity;
+      
+      if (newQuantity > product.stockQuantity) {
+        toast.error(`Cannot add more. Only ${product.stockQuantity} items available in stock`);
+        return;
+      }
+
+      quantityChange = quantity; // Only the new quantity being added
+      updatedCart = currentCart.map((item, index) =>
+        index === existingItemIndex
+          ? { ...item, quantity: newQuantity, stockQuantity: product.stockQuantity - quantity }
+          : item
+      );
+      toast.success(`Updated quantity in cart`);
+    } else {
+      // Add new item
+      const newItem: CartItem = {
+        productId: product.id,
+        productName: product.productName,
+        price: product.price,
+        imageURL: product.imageURL,
+        quantity,
+        stockQuantity: product.stockQuantity - quantity,
+      };
+      updatedCart = [...currentCart, newItem];
+      toast.success("Added to cart");
+    }
+
+    // Update stock in database
+    try {
+      await updateProductStock(product.id, -quantityChange);
+      writeCart(updatedCart);
+      setCartItems(updatedCart);
+      setShowCartPreview(true);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update stock. Please try again.");
+    }
+  }
+
+  async function updateCartQuantity(productId: string, delta: number) {
+    const item = cartItems.find((i) => i.productId === productId);
+    if (!item) return;
+
+    // Check current product stock from database
+    const product = featuredProducts.find((p) => p.id === productId);
+    if (!product) {
+      // Try to refresh product data
+      await refreshProduct(productId);
+      const refreshedProduct = featuredProducts.find((p) => p.id === productId);
+      if (!refreshedProduct) {
+        toast.error("Product not found");
+        return;
+      }
+    }
+
+    const currentProduct = product || featuredProducts.find((p) => p.id === productId);
+    if (!currentProduct) return;
+
+    const oldQuantity = item.quantity;
+    const availableStock = currentProduct.stockQuantity;
+    
+    // Calculate new quantity
+    let newQuantity = oldQuantity + delta;
+    
+    // Validate new quantity
+    if (delta > 0) {
+      // Increasing quantity - check available stock
+      if (availableStock < delta) {
+        toast.error(`Only ${availableStock} items available in stock`);
+        return;
+      }
+      newQuantity = Math.min(newQuantity, oldQuantity + availableStock);
+    } else {
+      // Decreasing quantity - minimum is 1
+      newQuantity = Math.max(newQuantity, 1);
+    }
+
+    const updated = cartItems.map((cartItem) => {
+      if (cartItem.productId !== productId) return cartItem;
+      return { 
+        ...cartItem, 
+        quantity: newQuantity,
+        stockQuantity: availableStock - (newQuantity - oldQuantity)
+      };
+    });
+
+    // Update stock in database
+    try {
+      const stockChange = delta;
+      await updateProductStock(productId, -stockChange);
+      writeCart(updated);
+      setCartItems(updated);
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update stock. Please try again.");
+    }
+  }
+
+  async function removeFromCart(productId: string) {
+    const item = cartItems.find((i) => i.productId === productId);
+    if (!item) return;
+
+    const quantityToRestore = item.quantity;
+    const updated = cartItems.filter((cartItem) => cartItem.productId !== productId);
+
+    // Restore stock in database
+    try {
+      await updateProductStock(productId, quantityToRestore);
+      writeCart(updated);
+      setCartItems(updated);
+      toast.success("Removed from cart");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to restore stock. Please try again.");
+    }
+  }
+
+  async function clearCart() {
+    // Restore stock for all items
+    const restorePromises = cartItems.map((item) =>
+      updateProductStock(item.productId, item.quantity).catch((error) => {
+        console.error(`Failed to restore stock for ${item.productId}:`, error);
+      })
+    );
+
+    await Promise.all(restorePromises);
+    writeCart([]);
+    setCartItems([]);
+    toast.success("Cart cleared");
+  }
 
   const heroStats = [
     {
@@ -300,33 +580,117 @@ export default function HomePage() {
                     </div>
                   </div>
 
-                  <div className="mt-auto flex items-end justify-between">
-                    <div>
-                      <p className="text-sm text-gray-400 uppercase tracking-[0.35em]">Price</p>
-                      <p className="text-3xl font-extrabold text-[var(--gold)]">GH₵ {product.price.toFixed(2)}</p>
+                  <div className="mt-auto space-y-3">
+                    <div className="flex items-end justify-between gap-4">
+                      <div className="flex-1">
+                        <p className="text-sm text-gray-400 uppercase tracking-[0.35em]">Price</p>
+                        <p className="text-3xl font-extrabold text-[var(--gold)]">GH₵ {product.price.toFixed(2)}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-400 uppercase tracking-[0.35em] mb-1">Stock Available</p>
+                        {product.stockQuantity > 0 ? (
+                          <div className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-sm ${
+                            product.stockQuantity < 10 
+                              ? 'bg-orange-500/20 text-orange-300 border border-orange-500/30' 
+                              : 'bg-green-500/20 text-green-300 border border-green-500/30'
+                          }`}>
+                            <span className="text-lg">{product.stockQuantity}</span>
+                            <span className="text-xs">units</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-bold text-sm bg-red-500/20 text-red-300 border border-red-500/30">
+                            <span>Out of stock</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
+                    
+                    {product.stockQuantity > 0 && (
+                      <div className="flex items-center gap-3">
+                        <label className="text-xs text-gray-400 uppercase tracking-[0.35em]">Quantity:</label>
+                        <div className="flex items-center gap-2 bg-[rgba(255,255,255,0.05)] rounded-xl border border-white/10 p-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateQuantity(product.id, -1);
+                            }}
+                            disabled={productQuantities[product.id] <= 1}
+                            className="rounded-lg border border-white/20 p-1.5 hover:border-white/40 bg-white/5 hover:bg-white/10 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <FaMinus className="text-xs" />
+                          </button>
+                          <input
+                            type="number"
+                            min="1"
+                            max={product.stockQuantity}
+                            value={productQuantities[product.id] || 1}
+                            onChange={(e) => {
+                              const value = parseInt(e.target.value) || 1;
+                              setQuantity(product.id, value);
+                            }}
+                            onClick={(e) => e.stopPropagation()}
+                            className="w-12 text-center bg-transparent text-white font-semibold text-sm border-none outline-none"
+                          />
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              updateQuantity(product.id, 1);
+                            }}
+                            disabled={productQuantities[product.id] >= product.stockQuantity}
+                            className="rounded-lg border border-white/20 p-1.5 hover:border-white/40 bg-white/5 hover:bg-white/10 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <FaPlus className="text-xs" />
+                          </button>
+                        </div>
+                        <span className="text-xs text-gray-400 ml-auto">
+                          Max: {product.stockQuantity}
+                        </span>
+                      </div>
+                    )}
+
                     <div className="flex gap-2">
                       <Link
                         href={`/ui/products/${product.id}`}
-                        className="btn-primary px-4 py-2 rounded-xl text-sm font-semibold"
+                        className="btn-primary flex-1 px-4 py-2 rounded-xl text-sm font-semibold text-center"
                       >
                         View product
                       </Link>
-                      <Link
-                        href={`/ui/cart?add=${product.id}`}
-                        className="btn-accent px-4 py-2 rounded-xl text-sm font-semibold"
-                      >
-                        Add to cart
-                      </Link>
+                      {product.stockQuantity > 0 ? (
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            addToCart(product);
+                          }}
+                          className="btn-accent px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2"
+                        >
+                          <FaShoppingCart /> Add to cart
+                        </button>
+                      ) : (
+                        <button
+                          disabled
+                          className="btn-accent px-4 py-2 rounded-xl text-sm font-semibold opacity-50 cursor-not-allowed"
+                        >
+                          Out of stock
+                        </button>
+                      )}
                     </div>
                   </div>
 
                   {product.stockQuantity <= 0 ? (
-                    <p className="text-xs font-semibold text-red-400">Out of stock – check back soon.</p>
+                    <p className="text-xs font-semibold text-red-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse"></span>
+                      Out of stock – check back soon.
+                    </p>
                   ) : product.stockQuantity < 10 ? (
-                    <p className="text-xs font-semibold text-orange-300">Only {product.stockQuantity} left. Order now.</p>
+                    <p className="text-xs font-semibold text-orange-300 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-orange-300 animate-pulse"></span>
+                      Only {product.stockQuantity} left. Order now!
+                    </p>
                   ) : (
-                    <p className="text-xs text-gray-400">In stock: {product.stockQuantity} units available.</p>
+                    <p className="text-xs text-gray-400 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-green-400"></span>
+                      {product.stockQuantity} units available in stock
+                    </p>
                   )}
                 </div>
               </div>
@@ -334,6 +698,161 @@ export default function HomePage() {
           </div>
         )}
       </section>
+
+      {/* Cart Preview Modal */}
+      {showCartPreview && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowCartPreview(false)}>
+          <div className="glass-surface rounded-t-3xl sm:rounded-3xl w-full sm:max-w-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between p-6 border-b border-white/10">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Your Cart</h2>
+                <p className="text-sm text-gray-400 mt-1">{cartTotals.totalItems} item(s) selected</p>
+              </div>
+              <button
+                onClick={() => setShowCartPreview(false)}
+                className="rounded-full border border-white/20 p-2 hover:border-white/40 bg-white/5 hover:bg-white/10 text-white transition-all"
+              >
+                <FaTimes />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {cartItems.length === 0 ? (
+                <div className="text-center py-12">
+                  <FaShoppingCart className="mx-auto text-4xl text-gray-400 mb-4" />
+                  <p className="text-gray-300">Your cart is empty</p>
+                </div>
+              ) : (
+                cartItems.map((item) => (
+                  <div key={item.productId} className="glass-surface rounded-2xl p-4 flex gap-4">
+                    <div className="relative h-20 w-20 flex-shrink-0 overflow-hidden rounded-xl border border-white/20 bg-white/10">
+                      {item.imageURL ? (
+                        <Image src={item.imageURL} alt={item.productName} fill className="object-cover" />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-gray-300">
+                          <FiImage className="text-xl" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <h3 className="text-sm font-semibold text-white line-clamp-1">{item.productName}</h3>
+                          <p className="text-xs text-gray-400">GH₵ {item.price.toFixed(2)} each</p>
+                        </div>
+                        <button
+                          onClick={() => removeFromCart(item.productId)}
+                          className="text-red-400 hover:text-red-300 transition-colors"
+                        >
+                          <FaTrash className="text-sm" />
+                        </button>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 bg-[rgba(255,255,255,0.05)] rounded-lg border border-white/10 p-1">
+                          <button
+                            onClick={() => updateCartQuantity(item.productId, -1)}
+                            className="rounded border border-white/20 p-1 hover:border-white/40 bg-white/5 hover:bg-white/10 text-white transition-all"
+                          >
+                            <FaMinus className="text-xs" />
+                          </button>
+                          <span className="min-w-[32px] text-center font-semibold text-white text-sm">{item.quantity}</span>
+                          <button
+                            onClick={() => updateCartQuantity(item.productId, 1)}
+                            disabled={(() => {
+                              const product = featuredProducts.find((p) => p.id === item.productId);
+                              return product ? item.quantity >= product.stockQuantity : true;
+                            })()}
+                            className="rounded border border-white/20 p-1 hover:border-white/40 bg-white/5 hover:bg-white/10 text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <FaPlus className="text-xs" />
+                          </button>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm font-bold text-[var(--gold)]">
+                            GH₵ {(item.price * item.quantity).toFixed(2)}
+                          </p>
+                          {(() => {
+                            const product = featuredProducts.find((p) => p.id === item.productId);
+                            const availableStock = product?.stockQuantity || 0;
+                            return (
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                {availableStock > 0 ? (
+                                  <span className="text-green-400">{availableStock} available in stock</span>
+                                ) : (
+                                  <span className="text-red-400">Out of stock</span>
+                                )}
+                              </p>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {cartItems.length > 0 && (
+              <div className="border-t border-white/10 p-6 space-y-4">
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between text-gray-300">
+                    <span>Subtotal</span>
+                    <span className="font-semibold">GH₵ {cartTotals.subtotal.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-300">
+                    <span>Shipping</span>
+                    <span className="font-semibold">{cartTotals.shipping === 0 ? "FREE" : `GH₵ ${cartTotals.shipping.toFixed(2)}`}</span>
+                  </div>
+                  {cartTotals.subtotal > 0 && cartTotals.subtotal < 500 && (
+                    <p className="text-xs text-gray-400 bg-white/5 rounded-lg p-2 border border-white/10">
+                      Add GH₵ {(500 - cartTotals.subtotal).toFixed(2)} more for free shipping
+                    </p>
+                  )}
+                  <div className="border-t border-white/20 pt-2 flex justify-between text-lg font-bold text-white">
+                    <span>Total</span>
+                    <span className="text-[var(--gold)]">GH₵ {cartTotals.total.toFixed(2)}</span>
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    onClick={clearCart}
+                    className="flex-1 px-4 py-2 rounded-xl text-sm font-semibold border border-red-400/30 text-red-400 hover:bg-red-400/10 transition-colors"
+                  >
+                    Clear cart
+                  </button>
+                  <Link
+                    href="/ui/cart"
+                    onClick={() => setShowCartPreview(false)}
+                    className="btn-primary flex-1 px-4 py-2 rounded-xl text-sm font-semibold text-center"
+                  >
+                    Go to cart
+                  </Link>
+                </div>
+                <Link
+                  href="/ui/checkout"
+                  onClick={() => setShowCartPreview(false)}
+                  className="btn-accent block w-full px-4 py-2 rounded-xl text-sm font-semibold text-center"
+                >
+                  Proceed to checkout
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Cart Icon Button - Floating */}
+      {cartItems.length > 0 && !showCartPreview && (
+        <button
+          onClick={() => setShowCartPreview(true)}
+          className="fixed bottom-6 right-6 z-40 bg-[var(--primary)] hover:bg-[var(--primary)]/90 text-white rounded-full p-4 shadow-lg shadow-[rgba(10,155,69,0.3)] flex items-center gap-2 transition-all hover:scale-105"
+        >
+          <FaShoppingCart className="text-xl" />
+          <span className="bg-[var(--gold)] text-black rounded-full px-2 py-0.5 text-xs font-bold">
+            {cartTotals.totalItems}
+          </span>
+        </button>
+      )}
     </div>
   );
 }
