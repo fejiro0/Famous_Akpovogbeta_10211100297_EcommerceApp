@@ -1,9 +1,17 @@
 # 🛒 GoMart - Ghana's Premier E-commerce Platform
 
 [![GitHub Repository](https://img.shields.io/badge/GitHub-GoMart-blue?style=flat-square&logo=github)](https://github.com/fejiro0/ca_10211100297.git)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-GoMart-green?style=flat-square)](https://gomartgh.onrender.com/)
 [![Node.js](https://img.shields.io/badge/Node.js-18+-green?style=flat-square&logo=node.js)](https://nodejs.org/)
 [![MongoDB](https://img.shields.io/badge/Database-MongoDB-green?style=flat-square&logo=mongodb)](https://mongodb.com/)
 [![Next.js](https://img.shields.io/badge/Frontend-Next.js-black?style=flat-square&logo=next.js)](https://nextjs.org/)
+
+## 👤 Developer Information
+
+**Developer:** Famous Akpovogbeta  
+**Roll Number:** 10211100297  
+**GitHub Repository:** [https://github.com/fejiro0/ca_10211100297.git](https://github.com/fejiro0/ca_10211100297.git)  
+**Live Application:** [https://gomartgh.onrender.com/](https://gomartgh.onrender.com/)
 
 ## 🌟 Project Overview
 
@@ -12,6 +20,7 @@ GoMart is an innovative, comprehensive e-commerce platform designed specifically
 ## 📁 Repository Information
 
 **Repository:** [GoMart E-commerce App](https://github.com/fejiro0/ca_10211100297.git)  
+**Live URL:** [https://gomartgh.onrender.com/](https://gomartgh.onrender.com/)  
 **Technology:** Full-stack JavaScript (Node.js + Next.js)  
 **Database:** MongoDB Atlas with Prisma ORM
 
@@ -33,6 +42,29 @@ GoMart is an innovative, comprehensive e-commerce platform designed specifically
 - Vendor management system
 - Payment processing
 - Shipping and delivery tracking
+
+### 👥 User Roles & Access Control
+
+**Regular Users:**
+- Can create an account and register
+- Can view all products and categories
+- Can add products to cart
+- Can make purchases
+- Can browse and search products
+
+**Admin Access:**
+- **Admin Credentials:**
+  - Email: `admin@gmail.com`
+  - Password: `12345`
+- **Admin Capabilities:**
+  - View all products
+  - Create new products
+  - Edit existing products
+  - Delete products
+  - Update product information
+  - Manage categories
+  - View and manage all orders
+  - Access admin dashboard
 
 ### 🤖 Innovative Features (Future Phases)
 - AI-powered product recommendations
@@ -96,6 +128,9 @@ EcommerceCloudApp/
 git clone https://github.com/fejiro0/ca_10211100297.git
 cd ca_10211100297/EcommerceCloudApp
 ```
+
+### Access Live Application
+Visit the live application at: [https://gomartgh.onrender.com/](https://gomartgh.onrender.com/)
 
 ### Project Setup
 
@@ -297,4 +332,23 @@ For questions and support, please create an issue in the repository or contact t
 
 ---
 
-**GoMart** - Empowering Ghana's Digital Economy 🇬🇭
+## 🔐 Admin Access
+
+To access admin features:
+1. Visit the live application: [https://gomartgh.onrender.com/](https://gomartgh.onrender.com/)
+2. Navigate to the login page
+3. Use the following credentials:
+   - **Email:** `admin@gmail.com`
+   - **Password:** `12345`
+4. Once logged in as admin, you can:
+   - Access the admin dashboard
+   - Create, edit, delete, and update products
+   - Manage categories
+   - View all orders and customer data
+
+**Note:** Regular users can create accounts, view products, and make purchases, but only the admin account has access to product management features.
+
+---
+
+**GoMart** - Empowering Ghana's Digital Economy 🇬🇭  
+**Developed by:** Famous Akpovogbeta (Roll Number: 10211100297)
